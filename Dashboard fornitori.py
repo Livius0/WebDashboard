@@ -17,18 +17,7 @@ st.set_page_config(layout="wide", page_title="Risk Management Dashboard", initia
 # —————————————————————————————
 # 1) DB & HELPERS
 # —————————————————————————————
-import sys
-from pathlib import Path
-
-# --- Gestione del percorso per PyInstaller ---
-if getattr(sys, 'frozen', False):
-    # Se l'app è "congelata" (es. tramite PyInstaller)
-    application_path = Path(sys._MEIPASS)
-else:
-    # Se l'app sta girando normalmente come script .py
-    application_path = Path(__file__).parent
-
-DB_PATH = application_path / "app.db"
+DB_PATH = Path("app.db")
 
 def get_connection():
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
@@ -84,50 +73,38 @@ def load_risks_df():
 # —————————————————————————————
 # 2) SESSION_STATE INIT
 # —————————————————————————————
-for key, val in [("authenticated", False), ("username", ""), ("role", ""), ("page", "Home")]:
+# MODIFICA: La pagina di default dopo il login sarà "Dashboard"
+for key, val in [("authenticated", False), ("username", ""), ("role", ""), ("page", "Dashboard")]:
     if key not in st.session_state:
         st.session_state[key] = val
 
 # —————————————————————————————
-# 3) STILE GRAFICO (CSS con Background Animato più Veloce e Scuro)
+# 3) STILE GRAFICO (CSS con Tema Scuro Fisso)
 # —————————————————————————————
 def set_page_style():
-    # MODIFICA: Palette più scura e animazione più veloce
+    # Tema scuro statico e professionale
+    bg_color = "#000000" 
+    sidebar_bg_color = "#0F172A"
+    text_color = "#FFFFFF"
+    text_muted_color = "#94A3B8"
+    border_color = "rgba(148, 163, 184, 0.2)"
+    
     css = f"""
     <style>
-        @keyframes dynamicGradient {{
-            0%   {{ background-position: 0% 50%; }}
-            50%  {{ background-position: 100% 50%; }}
-            100% {{ background-position: 0% 50%; }}
-        }}
-
-        .stApp {{
-            background: linear-gradient(-45deg, #020024, #090979, #00d4ff, #23d5ab);
-            background-size: 400% 400%;
-            animation: dynamicGradient 15s ease infinite;
-            color: #FFFFFF;
-        }}
+        .st-emotion-cache-18ni7ap, .st-emotion-cache-h4xjwg {{ display: none; }}
+        .stApp {{ background-color: {bg_color}; color: {text_color}; }}
         
         [data-testid="stSidebar"] {{
-            background-color: rgba(15, 23, 42, 0.85); /* Leggermente più opaco per leggibilità */
-            backdrop-filter: blur(10px);
-            -webkit-backdrop-filter: blur(10px);
-            border-right: 1px solid rgba(148, 163, 184, 0.2);
+            background-color: {sidebar_bg_color};
+            border-right: 1px solid {border_color};
         }}
         
         [data-testid="stSidebarCollapseButton"] {{ display: none !important; }}
         
         h1, h2, h3, p, label, .st-emotion-cache-16txtl3, .st-emotion-cache-qbe2hs, .st-emotion-cache-aw8l5d, .st-emotion-cache-bm2z3a {{
-             color: #FFFFFF !important; 
+             color: {text_color} !important; 
         }}
         
-        /* Stile per i widget all'interno delle sezioni per renderli più visibili */
-        .st-emotion-cache-uf99v8, .st-emotion-cache-1r6slb0, .st-emotion-cache-1jicfl2 {{
-             background-color: rgba(15, 23, 42, 0.4);
-             padding: 20px;
-             border-radius: 10px;
-        }}
-
         [data-testid="stToolbar"] {{ display: none !important; }}
     </style>
     """
@@ -139,7 +116,8 @@ def set_page_style():
 def do_login(user, pwd):
     row = conn.execute("SELECT role FROM users WHERE username=? AND password=?", (user, pwd)).fetchone()
     if row:
-        st.session_state.update(authenticated=True, username=user, role=row["role"], page="Home")
+        # MODIFICA: Al login, imposta la pagina di default a "Dashboard"
+        st.session_state.update(authenticated=True, username=user, role=row["role"], page="Dashboard")
         return True
     return False
 
@@ -148,15 +126,44 @@ def do_logout():
 
 set_page_style()
 
+# MODIFICA: Pagina di Login completamente ridisegnata
 if not st.session_state.authenticated:
-    st.title("Risk Management Login")
-    with st.form("login"):
-        user = st.text_input("Username")
-        pwd  = st.text_input("Password", type="password")
-        if st.form_submit_button("Entra", use_container_width=True):
-            if do_login(user, pwd): st.rerun()
-            else: st.error("Credenziali errate")
+    st.title("Risk Management Dashboard")
+    st.markdown("---")
+    
+    col1, col2 = st.columns([1, 1], gap="large")
+
+    with col1:
+        st.subheader("Benvenuto")
+        st.markdown("""
+        Questa applicazione è uno strumento completo per il censimento, la gestione e il monitoraggio dei rischi associati ai fornitori. 
+        Permette di centralizzare le informazioni, analizzare i dati attraverso una dashboard interattiva e generare report dettagliati.
+        """)
+        
+        st.subheader("Guida alle Funzionalità")
+        with st.expander("📊 Dashboard"):
+            st.write("Visualizza i dati dei rischi in forma aggregata tramite grafici interattivi. Puoi filtrare i dati per fornitore e stato per un'analisi mirata.")
+        with st.expander("📄 Report PDF"):
+            st.write("Genera report professionali in formato PDF, con grafici di sintesi e dettagli strutturati, ideali per la condivisione e l'archiviazione.")
+        with st.expander("➕ Censimento Fornitori"):
+            st.write("Inserisci nuovi rischi associati ai fornitori. Compila il modulo per aggiungere un nuovo record al database (richiede ruolo 'modify' o 'admin').")
+        with st.expander("✏️ Modifica"):
+            st.write("Modifica i dati dei rischi esistenti. Filtra per fornitore e modifica direttamente i valori nella tabella (richiede ruolo 'modify' o 'admin').")
+        with st.expander("🔧 Admin"):
+            st.write("Sezione riservata agli amministratori per la gestione degli utenti: puoi creare nuovi utenti o eliminare quelli esistenti.")
+
+    with col2:
+        st.subheader("Login")
+        with st.form("login_form"):
+            user = st.text_input("Username")
+            pwd  = st.text_input("Password", type="password")
+            if st.form_submit_button("Entra", use_container_width=True):
+                if do_login(user, pwd):
+                    st.rerun()
+                else:
+                    st.error("Credenziali errate")
     st.stop()
+
 
 with st.sidebar:
     st.title("Risk Dashboard")
@@ -164,13 +171,17 @@ with st.sidebar:
     st.markdown(f"Ruolo: `{st.session_state.role}`")
     st.markdown("---")
     
-    base_menu, modify_menu, admin_menu = ["Home", "Dashboard", "Report PDF"], ["Censimento Fornitori", "Modifica"], ["Admin"]
+    # MODIFICA: Rimosso "Home" dal menu
+    base_menu, modify_menu, admin_menu = ["Dashboard", "Report PDF"], ["Censimento Fornitori", "Modifica"], ["Admin"]
     final_menu = base_menu.copy()
-    if st.session_state.role in ['modify', 'admin']: final_menu.extend(modify_menu)
-    if st.session_state.role == 'admin': final_menu.extend(admin_menu)
+    if st.session_state.role in ['modify', 'admin']:
+        final_menu.extend(modify_menu)
+    if st.session_state.role == 'admin':
+        final_menu.extend(admin_menu)
 
     for item in final_menu:
-        if st.button(item, key=f"menu_{item}"): st.session_state.page = item
+        if st.button(item, key=f"menu_{item}"):
+            st.session_state.page = item
     
     st.markdown("---")
     if st.button("🔓 Logout"):
@@ -184,25 +195,42 @@ df = load_risks_df()
 page = st.session_state.page
 st.title(page)
 
-if page == "Home":
-    st.subheader(f"Guida alle Sezioni dell'Applicazione")
-    st.info("Espandi ogni sezione per scoprire a cosa serve.")
-    if "Home" in final_menu:
-        with st.expander("🏠 Home", expanded=True): st.write("Pagina di benvenuto con un riepilogo rapido dei rischi e questa guida.")
-    if "Dashboard" in final_menu:
-        with st.expander("📊 Dashboard"): st.write("Visualizza i dati dei rischi in forma aggregata tramite grafici interattivi.")
-    if "Report PDF" in final_menu:
-        with st.expander("📄 Report PDF"): st.write("Genera report professionali in formato PDF, con grafici e dettagli strutturati.")
-    if "Censimento Fornitori" in final_menu:
-        with st.expander("➕ Censimento Fornitori"): st.write("Inserisci nuovi rischi associati ai fornitori nel database.")
-    if "Modifica" in final_menu:
-        with st.expander("✏️ Modifica"): st.write("Modifica i dati dei rischi esistenti.")
-    if "Admin" in final_menu:
-        with st.expander("🔧 Admin"): st.write("Sezione per la gestione degli utenti.")
+# MODIFICA: Rimossa la pagina "Home", si parte dalla "Dashboard"
+if page == "Dashboard":
+    # MODIFICA: Aggiunto il riepilogo rapido qui
     st.subheader("Riepilogo Rapido")
     total, open_r, closed = len(df), len(df[df['stato'] == 'aperto']), len(df[df['stato'] == 'chiuso'])
     c1, c2, c3 = st.columns(3)
-    c1.metric("Rischi Totali", total); c2.metric("Rischi Aperti", open_r); c3.metric("Rischi Chiusi", closed)
+    c1.metric("Rischi Totali", total)
+    c2.metric("Rischi Aperti", open_r)
+    c3.metric("Rischi Chiusi", closed)
+    st.markdown("---")
+
+    c1, c2 = st.columns([1, 3])
+    with c1:
+        st.subheader("Filtri")
+        sup_opts, default_stati = ["Tutti"] + sorted(df["fornitore"].unique().tolist()), ["aperto", "chiuso"]
+        sel_sup = st.selectbox("Fornitore", sup_opts)
+        sel_stati = st.multiselect("Stato", default_stati, default=default_stati)
+    dff = df[df["stato"].isin(sel_stati)]
+    if sel_sup != "Tutti": dff = dff[dff["fornitore"] == sel_sup]
+    with c2:
+        st.subheader("Grafici di Riepilogo")
+        if dff.empty:
+            st.warning("Nessun dato da visualizzare con i filtri correnti.")
+        else:
+            gc1, gc2 = st.columns(2)
+            with gc1:
+                agg_bar = dff.groupby("stato").size().reset_index(name="count")
+                fig_bar = px.bar(agg_bar, x="stato", y="count", color="stato", labels={"stato": "Stato", "count": "Numero"}, title="Conteggio per Stato")
+                st.plotly_chart(fig_bar, use_container_width=True)
+            with gc2:
+                agg_pie = dff.groupby("gravita").size().reset_index(name="count")
+                fig_pie = px.pie(agg_pie, values="count", names="gravita", hole=0.4, title="Ripartizione per Gravità", color="gravita", color_discrete_map={"Critical": "#d9534f", "Hight": "#f0ad4e", "Low": "#5cb85c"})
+                st.plotly_chart(fig_pie, use_container_width=True)
+    st.subheader("Dati in Dettaglio")
+    st.dataframe(dff, use_container_width=True)
+
 
 elif page == "Censimento Fornitori":
     with st.form("form_ins", clear_on_submit=True):
@@ -226,32 +254,9 @@ elif page == "Censimento Fornitori":
                 conn.commit()
                 st.success("Rischio inserito.")
 
-elif page == "Dashboard":
-    c1, c2 = st.columns([1, 3])
-    with c1:
-        st.subheader("Filtri")
-        sup_opts, default_stati = ["Tutti"] + sorted(df["fornitore"].unique().tolist()), ["aperto", "chiuso"]
-        sel_sup = st.selectbox("Fornitore", sup_opts)
-        sel_stati = st.multiselect("Stato", default_stati, default=default_stati)
-    dff = df[df["stato"].isin(sel_stati)]
-    if sel_sup != "Tutti": dff = dff[dff["fornitore"] == sel_sup]
-    with c2:
-        if dff.empty: st.warning("Nessun dato da visualizzare con i filtri correnti.")
-        else:
-            gc1, gc2 = st.columns(2)
-            with gc1:
-                agg_bar = dff.groupby("stato").size().reset_index(name="count")
-                fig_bar = px.bar(agg_bar, x="stato", y="count", color="stato", labels={"stato": "Stato", "count": "Numero"}, title="Conteggio per Stato")
-                st.plotly_chart(fig_bar, use_container_width=True)
-            with gc2:
-                agg_pie = dff.groupby("gravita").size().reset_index(name="count")
-                fig_pie = px.pie(agg_pie, values="count", names="gravita", hole=0.4, title="Ripartizione per Gravità", color="gravita", color_discrete_map={"Critical": "#d9534f", "Hight": "#f0ad4e", "Low": "#5cb85c"})
-                st.plotly_chart(fig_pie, use_container_width=True)
-    st.subheader("Dati in Dettaglio")
-    st.dataframe(dff, use_container_width=True)
 
 elif page == "Modifica":
-    st.info("In questa sezione puoi modificare i dati esistenti.")
+    st.info("In questa sezione puoi modificare i dati esistenti. L'aggiunta di nuove righe è disabilitata.")
     sup_opts = ["Tutti"] + sorted(df["fornitore"].unique().tolist())
     sel = st.selectbox("Filtra Fornitore per modificare", sup_opts, key="modifica_sel")
     
