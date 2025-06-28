@@ -96,6 +96,51 @@ def set_page_style():
              color: {text_color} !important; 
         }}
         [data-testid="stToolbar"] {{ display: none !important; }}
+
+        /* --- NUOVO: STILE PERSONALIZZATO PER LE TABELLE --- */
+        .stDataFrame, .stDataEditor {{
+            border-radius: 10px;
+            overflow: hidden;
+            border: 1px solid rgba(148, 163, 184, 0.2);
+        }}
+        /* Intestazione della tabella */
+        [data-testid="stDataFrame"] thead th, [data-testid="stDataEditor-header"] {{
+            background-color: #1E293B; /* Blu scuro per l'header */
+            color: white;
+            font-weight: bold;
+            text-transform: uppercase;
+            font-size: 14px;
+        }}
+        /* Corpo della tabella */
+        [data-testid="stDataFrame"] tbody tr, [data-testid="stDataEditor-row"] {{
+            background-color: transparent;
+        }}
+        /* Righe alternate (zebra) */
+        [data-testid="stDataFrame"] tbody tr:nth-child(even), [data-testid="stDataEditor-row"]:nth-child(even) {{
+            background-color: rgba(45, 55, 72, 0.5); /* Grigio scuro per righe pari */
+        }}
+        /* Celle */
+        [data-testid="stDataFrame"] td, [data-testid="stDataEditor-cell"] {{
+            color: #E2E8F0; /* Testo grigio chiaro */
+            border-color: rgba(148, 163, 184, 0.2) !important;
+        }}
+        /* Scrollbar personalizzate */
+        [data-testid="stDataFrame"] .data-grid-container, [data-testid="stDataEditor-container"] {{
+            scrollbar-color: #4A5568 #2D3748;
+            scrollbar-width: thin;
+        }}
+        [data-testid="stDataFrame"] .data-grid-container::-webkit-scrollbar, [data-testid="stDataEditor-container"]::-webkit-scrollbar {{
+            width: 8px;
+            height: 8px;
+        }}
+        [data-testid="stDataFrame"] .data-grid-container::-webkit-scrollbar-track, [data-testid="stDataEditor-container"]::-webkit-scrollbar-track {{
+            background: #2D3748;
+        }}
+        [data-testid="stDataFrame"] .data-grid-container::-webkit-scrollbar-thumb, [data-testid="stDataEditor-container"]::-webkit-scrollbar-thumb {{
+            background-color: #4A5568;
+            border-radius: 10px;
+            border: 2px solid #2D3748;
+        }}
     </style>
     """
     st.markdown(css, unsafe_allow_html=True)
@@ -176,14 +221,10 @@ if page == "Dashboard":
     df_reminders = load_reminders_df()
 
     st.subheader("Reminder Scaduti (5+ giorni)")
-    
-    # --- CORREZIONE CHIAVE ---
-    # Controlla se il dataframe ha dati e la colonna necessaria prima di filtrare
     if not df_reminders.empty and 'giorni_trascorsi' in df_reminders.columns:
         reminders_scaduti = df_reminders[(df_reminders['giorni_trascorsi'] >= 5) & (df_reminders['stato_reminder'] == 'Attivo')]
     else:
-        reminders_scaduti = pd.DataFrame() # Crea un dataframe vuoto se non ci sono dati
-    # --- FINE CORREZIONE ---
+        reminders_scaduti = pd.DataFrame() 
 
     if reminders_scaduti.empty:
         st.success("✔️ Nessun reminder scaduto. Ottimo lavoro!")
@@ -215,10 +256,12 @@ if page == "Dashboard":
                 fig_bar = px.bar(dff.groupby("stato").size().reset_index(name="count"), x="stato", y="count", color="stato", title="Conteggio Rischi per Stato")
                 st.plotly_chart(fig_bar, use_container_width=True)
             with gc2:
-                fig_pie = px.pie(dff.groupby("gravita").size().reset_index(name="count"), values="count", names="gravita", hole=0.4, title="Ripartizione Rischi per Gravità", color_discrete_map={"Critical": "#d9534f", "Hight": "#f0ad4e", "Low": "#5cb85c"})
+                agg_pie = dff.groupby("gravita").size().reset_index(name="count")
+                fig_pie = px.pie(agg_pie, values="count", names="gravita", hole=0.4, title="Ripartizione Rischi per Gravità", color_discrete_map={"Critical": "#d9534f", "Hight": "#f0ad4e", "Low": "#5cb85c"})
                 st.plotly_chart(fig_pie, use_container_width=True)
     st.subheader("Dettaglio Rischi")
     st.dataframe(dff, use_container_width=True)
+
 
 elif page == "Follow-up":
     st.info("Traccia le comunicazioni inviate ai fornitori e le evidenze ricevute.")
@@ -267,7 +310,6 @@ elif page == "Follow-up":
                     st.success(f"Salvate {len(ids_to_update)} modifiche."); st.rerun()
             except Exception as e: st.error(f"Errore durante il salvataggio: {e}")
 
-# ... (Le altre pagine rimangono invariate, qui il codice completo)
 elif page == "Censimento Fornitori":
     with st.form("form_ins_risks", clear_on_submit=True):
         st.subheader("Censimento Nuovo Rischio Fornitore")
