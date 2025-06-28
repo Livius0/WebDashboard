@@ -97,7 +97,7 @@ def set_page_style():
         }}
         [data-testid="stToolbar"] {{ display: none !important; }}
 
-        /* --- NUOVO: STILE PERSONALIZZATO PER LE TABELLE --- */
+        /* --- MODIFICA: REINSERITO STILE PERSONALIZZATO PER LE TABELLE --- */
         .stDataFrame, .stDataEditor {{
             border-radius: 10px;
             overflow: hidden;
@@ -105,7 +105,7 @@ def set_page_style():
         }}
         /* Intestazione della tabella */
         [data-testid="stDataFrame"] thead th, [data-testid="stDataEditor-header"] {{
-            background-color: #1E293B; /* Blu scuro per l'header */
+            background-color: #1E293B;
             color: white;
             font-weight: bold;
             text-transform: uppercase;
@@ -117,26 +117,26 @@ def set_page_style():
         }}
         /* Righe alternate (zebra) */
         [data-testid="stDataFrame"] tbody tr:nth-child(even), [data-testid="stDataEditor-row"]:nth-child(even) {{
-            background-color: rgba(45, 55, 72, 0.5); /* Grigio scuro per righe pari */
+            background-color: rgba(45, 55, 72, 0.5);
         }}
         /* Celle */
         [data-testid="stDataFrame"] td, [data-testid="stDataEditor-cell"] {{
-            color: #E2E8F0; /* Testo grigio chiaro */
+            color: #E2E8F0;
             border-color: rgba(148, 163, 184, 0.2) !important;
         }}
         /* Scrollbar personalizzate */
-        [data-testid="stDataFrame"] .data-grid-container, [data-testid="stDataEditor-container"] {{
+        div[data-testid="stDataFrame"] div[role="grid"], div[data-testid="stDataEditor"] div[role="grid"] {{
             scrollbar-color: #4A5568 #2D3748;
             scrollbar-width: thin;
         }}
-        [data-testid="stDataFrame"] .data-grid-container::-webkit-scrollbar, [data-testid="stDataEditor-container"]::-webkit-scrollbar {{
+        div[data-testid="stDataFrame"] div[role="grid"]::-webkit-scrollbar, div[data-testid="stDataEditor"] div[role="grid"]::-webkit-scrollbar {{
             width: 8px;
             height: 8px;
         }}
-        [data-testid="stDataFrame"] .data-grid-container::-webkit-scrollbar-track, [data-testid="stDataEditor-container"]::-webkit-scrollbar-track {{
+        div[data-testid="stDataFrame"] div[role="grid"]::-webkit-scrollbar-track, div[data-testid="stDataEditor"] div[role="grid"]::-webkit-scrollbar-track {{
             background: #2D3748;
         }}
-        [data-testid="stDataFrame"] .data-grid-container::-webkit-scrollbar-thumb, [data-testid="stDataEditor-container"]::-webkit-scrollbar-thumb {{
+        div[data-testid="stDataFrame"] div[role="grid"]::-webkit-scrollbar-thumb, div[data-testid="stDataEditor"] div[role="grid"]::-webkit-scrollbar-thumb {{
             background-color: #4A5568;
             border-radius: 10px;
             border: 2px solid #2D3748;
