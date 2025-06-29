@@ -145,10 +145,13 @@ def set_page_style():
     """
     st.markdown(css, unsafe_allow_html=True)
 
-### MODIFICA ###
-# Nuova funzione per applicare stili dinamici alle tabelle dei rischi
+### INTEGRAZIONE ###
+# Funzione di styling aggiornata per gestire l'assenza di matplotlib
 def style_risk_dataframe(df: pd.DataFrame):
-    """Applica stili condizionali al DataFrame dei rischi per una migliore visualizzazione."""
+    """
+    Applica stili condizionali al DataFrame dei rischi per una migliore visualizzazione.
+    Gestisce l'ImportError se matplotlib non è installato.
+    """
     def style_gravita(v):
         color_map = {
             "Critical": "background-color: #d9534f; color: white; font-weight: bold;",
@@ -160,16 +163,26 @@ def style_risk_dataframe(df: pd.DataFrame):
     def style_stato(v):
         return "background-color: #3182bd; color: white;" if v == "aperto" else "background-color: #4A5568; color: #E2E8F0;"
 
-    # Applica gli stili
+    # Applica gli stili base
     styled_df = df.style.applymap(style_gravita, subset=['gravita']) \
-                        .applymap(style_stato, subset=['stato']) \
-                        .background_gradient(cmap='Blues', subset=['perc_avanzamento'], vmin=0, vmax=100) \
-                        .format({
-                            "data_inizio": "{:%d/%m/%Y}",
-                            "data_fine": "{:%d/%m/%Y}",
-                            "data_chiusura": lambda x: "{:%d/%m/%Y}".format(x) if pd.notna(x) else "N/A",
-                            "perc_avanzamento": "{}%"
-                        })
+                        .applymap(style_stato, subset=['stato'])
+    
+    # Tenta di applicare il gradiente, ma non blocca l'app in caso di errore
+    try:
+        styled_df = styled_df.background_gradient(cmap='Blues', subset=['perc_avanzamento'], vmin=0, vmax=100)
+    except ImportError:
+        # Se matplotlib non è installato, questo blocco previene il crash dell'app.
+        # L'avviso verrà stampato nei log del terminale / della console.
+        print("Avviso: 'matplotlib' non trovato. Lo stile 'background_gradient' non sarà applicato.")
+
+    # Applica la formattazione finale
+    styled_df = styled_df.format({
+        "data_inizio": "{:%d/%m/%Y}",
+        "data_fine": "{:%d/%m/%Y}",
+        "data_chiusura": lambda x: "{:%d/%m/%Y}".format(x) if pd.notna(x) else "N/A",
+        "perc_avanzamento": "{}%"
+    })
+    
     return styled_df
 
 # —————————————————————————————
@@ -284,11 +297,9 @@ if page == "Dashboard":
                 st.plotly_chart(fig_bar, use_container_width=True)
             with gc2:
                 agg_pie = dff.groupby("gravita").size().reset_index(name="count")
-                ### MODIFICA ###: Corretto "Hight" in "High"
                 fig_pie = px.pie(agg_pie, values="count", names="gravita", hole=0.4, title="Ripartizione Rischi per Gravità", color_discrete_map={"Critical": "#d9534f", "High": "#f0ad4e", "Low": "#5cb85c"})
                 st.plotly_chart(fig_pie, use_container_width=True)
     st.subheader("Dettaglio Rischi")
-    ### MODIFICA ###: Applicazione della funzione di styling alla tabella
     st.dataframe(style_risk_dataframe(dff), use_container_width=True)
 
 
@@ -324,7 +335,6 @@ elif page == "Follow-up":
         if st.button("Salva Modifiche Reminder", use_container_width=True):
             try:
                 original_to_compare = dff_attivi.set_index('id')
-                # st.data_editor restituisce un DataFrame, non un dizionario
                 edited_to_compare = pd.DataFrame(edited_reminders).set_index('id')
                 diff_df = original_to_compare.compare(edited_to_compare, keep_shape=True).dropna(how='all', axis=0)
 
@@ -349,7 +359,6 @@ elif page == "Censimento Fornitori":
             fornitore = st.text_input("Nome fornitore")
             contract_owner = st.text_input("Contract Owner")
             area_riferimento = st.text_input("Area di riferimento")
-            ### MODIFICA ###: Corretto "Hight" in "High"
             gravita = st.selectbox("Livello di gravità", ["Low","High","Critical"])
         with c2:
             rischio = st.selectbox("Scenario di rischio", ["-- seleziona --", "Inadeguate Security of third party", "Inadeguate resilience of third party", "Inadequate outsourcing of third party"])
@@ -358,7 +367,6 @@ elif page == "Censimento Fornitori":
             data_fine = st.date_input("Due Date", value=datetime.today())
             data_chiusura = st.date_input("Data di chiusura effettiva", value=datetime.today()) if stato == "chiuso" else None
         
-        ### MODIFICA ###: Aggiunto separatore per migliorare il layout
         st.markdown("---")
         perc_avanzamento = st.slider("Percentuale di avanzamento (%)", 0, 100, 0)
         note = st.text_area("Note libere")
@@ -380,7 +388,6 @@ elif page == "Modifica":
     if sel != "Tutti":
         dff_original = dff_original[dff_original["fornitore"] == sel]
 
-    ### MODIFICA ###: Rimosso num_rows="static" per maggiore chiarezza
     edited_df = st.data_editor(dff_original, use_container_width=True,
         column_config={"id": st.column_config.NumberColumn("ID", disabled=True), "data_fine": st.column_config.DateColumn("Due Date", format="YYYY-MM-DD")},
         key="data_editor_modifica")
@@ -415,7 +422,6 @@ elif page == "Report PDF":
     st.subheader("1. Seleziona il Perimetro del Report")
     all_suppliers = sorted(df_risks["fornitore"].unique().tolist())
     default_stati = list(df_risks["stato"].unique())
-    ### MODIFICA ###: Corretto "Hight" in "High"
     default_gravita = sorted(list(df_risks["gravita"].unique()))
     sel_suppliers = st.multiselect("Filtro Fornitore/i", all_suppliers)
     c1, c2 = st.columns(2)
@@ -439,7 +445,6 @@ elif page == "Report PDF":
                 styles=getSampleStyleSheet()
                 style_title, style_h1, style_h2, style_body = styles['Title'], styles['h1'], styles['h2'], styles['BodyText']
                 style_body.leading = 14
-                ### MODIFICA ###: Corretto "Hight" in "High"
                 color_map = {"Critical": colors.HexColor("#d9534f"), "High": colors.HexColor("#f0ad4e"), "Low": colors.HexColor("#5cb85c")}
 
                 def header_footer(canvas, doc):
@@ -524,3 +529,4 @@ elif page == "Admin":
                     conn.execute("DELETE FROM users WHERE username = ?", (user_to_delete,))
                     conn.commit()
                     st.success(f"Utente '{user_to_delete}' eliminato."); st.rerun()
+
