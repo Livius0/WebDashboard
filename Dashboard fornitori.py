@@ -1,7 +1,10 @@
+# app.py - VERSIONE AGGIORNATA PER DEPLOYMENT
+
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import sqlite3
+# import sqlite3 # Non più necessario per la connessione principale
+import libsql_client # Nuovo client per Turso
 from pathlib import Path
 from datetime import datetime
 from io import BytesIO
@@ -17,62 +20,110 @@ st.set_page_config(layout="wide", page_title="Risk Management Dashboard", initia
 # —————————————————————————————
 # 1) DB & HELPERS
 # —————————————————————————————
-DB_PATH = Path("app.db")
 
+# La connessione ora punta a Turso DB usando le credenziali in st.secrets
 def get_connection():
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
+    # Carica le credenziali dai segreti di Streamlit
+    url = st.secrets["DB_URL"]
+    auth_token = st.secrets["DB_AUTH_TOKEN"]
+    
+    # Crea una connessione sincrona
+    # check_same_thread=False non è necessario con questo client
+    conn = libsql_client.create_client_sync(url=url, auth_token=auth_token)
     return conn
+
+def execute_query(query, params=()):
+    conn = get_connection()
+    try:
+        # libsql_client usa un'API leggermente diversa.
+        # .execute() restituisce un ResultSet.
+        result_set = conn.execute(query, params)
+        
+        # Per le query SELECT, convertiamo il risultato in un DataFrame pandas.
+        if query.strip().upper().startswith("SELECT"):
+            columns = [col for col in result_set.columns]
+            data = [list(row) for row in result_set.rows]
+            return pd.DataFrame(data, columns=columns)
+        
+        # Per INSERT, UPDATE, DELETE, etc., non c'è bisogno di restituire dati.
+        # Possiamo committare (anche se l'autocommit è spesso predefinito)
+        conn.sync() # Assicura che le scritture siano inviate
+        return None # Indica successo
+    finally:
+        conn.close()
 
 def init_db():
     conn = get_connection()
-    c = conn.cursor()
-    c.execute("""
-      CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY, username TEXT UNIQUE NOT NULL, password TEXT NOT NULL,
-        role TEXT NOT NULL CHECK(role IN ('read','modify','admin'))
-      )
-    """)
-    c.execute("""
-      CREATE TABLE IF NOT EXISTS risks (
-        id INTEGER PRIMARY KEY, data_inizio TEXT NOT NULL, data_fine TEXT NOT NULL, fornitore TEXT NOT NULL,
-        rischio TEXT NOT NULL, stato TEXT NOT NULL, gravita TEXT NOT NULL, note TEXT, data_chiusura TEXT,
-        contract_owner TEXT NOT NULL, area_riferimento TEXT NOT NULL, perc_avanzamento INTEGER NOT NULL DEFAULT 0
-      )
-    """)
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS reminders (
-            id INTEGER PRIMARY KEY, fornitore_nome TEXT NOT NULL, data_invio TEXT NOT NULL,
-            stato_reminder TEXT NOT NULL CHECK(stato_reminder IN ('Attivo', 'Risposto')),
-            note TEXT, test_bc INTEGER NOT NULL DEFAULT 0, test_it INTEGER NOT NULL DEFAULT 0,
-            test_pt_va INTEGER NOT NULL DEFAULT 0, access_review INTEGER NOT NULL DEFAULT 0, ppt INTEGER NOT NULL DEFAULT 0
-        )
-    """)
-    c.execute("SELECT 1 FROM users WHERE username = ?", ("Flavio",))
-    if not c.fetchone():
-        c.execute("INSERT INTO users(username,password,role) VALUES(?,?,?)", ("Flavio","Dashboard2003","admin"))
-    conn.commit()
-    conn.close()
+    try:
+        # Le tabelle vengono create solo se non esistono già
+        conn.batch([
+            """
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY, username TEXT UNIQUE NOT NULL, password TEXT NOT NULL,
+                role TEXT NOT NULL CHECK(role IN ('read','modify','admin'))
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS risks (
+                id INTEGER PRIMARY KEY, data_inizio TEXT NOT NULL, data_fine TEXT NOT NULL, fornitore TEXT NOT NULL,
+                rischio TEXT NOT NULL, stato TEXT NOT NULL, gravita TEXT NOT NULL, note TEXT, data_chiusura TEXT,
+                contract_owner TEXT NOT NULL, area_riferimento TEXT NOT NULL, perc_avanzamento INTEGER NOT NULL DEFAULT 0
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS reminders (
+                id INTEGER PRIMARY KEY, fornitore_nome TEXT NOT NULL, data_invio TEXT NOT NULL,
+                stato_reminder TEXT NOT NULL CHECK(stato_reminder IN ('Attivo', 'Risposto')),
+                note TEXT, test_bc INTEGER NOT NULL DEFAULT 0, test_it INTEGER NOT NULL DEFAULT 0,
+                test_pt_va INTEGER NOT NULL DEFAULT 0, access_review INTEGER NOT NULL DEFAULT 0, ppt INTEGER NOT NULL DEFAULT 0
+            )
+            """
+        ])
+        
+        # Controlla se l'utente admin esiste e inseriscilo se necessario
+        result = conn.execute("SELECT 1 FROM users WHERE username = ?", ("Flavio",))
+        if len(result.rows) == 0:
+            conn.execute("INSERT INTO users(username,password,role) VALUES(?,?,?)", ("Flavio","Dashboard2003","admin"))
+        
+        conn.sync() # Sincronizza tutte le modifiche
+    finally:
+        conn.close()
 
+# Inizializza il DB all'avvio dell'app
 init_db()
-conn = get_connection()
 
+# Funzioni di caricamento dati aggiornate per usare execute_query
 def load_users():
-    return pd.read_sql_query("SELECT * FROM users", conn)
+    return execute_query("SELECT * FROM users")
 
 def load_risks_df():
-    return pd.read_sql_query("SELECT * FROM risks ORDER BY id DESC", conn, parse_dates=["data_inizio","data_fine","data_chiusura"])
+    df = execute_query("SELECT * FROM risks ORDER BY id DESC")
+    # Converte manualmente le colonne data
+    for col in ["data_inizio", "data_fine", "data_chiusura"]:
+        df[col] = pd.to_datetime(df[col], errors='coerce')
+    return df
 
 def load_reminders_df():
-    df_reminders = pd.read_sql_query("SELECT * FROM reminders ORDER BY data_invio ASC", conn, parse_dates=["data_invio"])
+    df_reminders = execute_query("SELECT * FROM reminders ORDER BY data_invio ASC")
     if not df_reminders.empty:
+        df_reminders["data_invio"] = pd.to_datetime(df_reminders["data_invio"], errors='coerce')
         today = pd.to_datetime(datetime.now().date())
         df_reminders['giorni_trascorsi'] = (today - df_reminders['data_invio']).dt.days
         df_reminders['giorni_al_reminder'] = (5 - df_reminders['giorni_trascorsi']).clip(lower=0)
     return df_reminders
+    
+# Funzioni di modifica dati aggiornate
+def db_write(query, params=()):
+    conn = get_connection()
+    try:
+        conn.execute(query, params)
+        conn.sync()
+    finally:
+        conn.close()
 
 # —————————————————————————————
 # 2) SESSION_STATE INIT
+# (Nessuna modifica qui)
 # —————————————————————————————
 for key, val in [("authenticated", False), ("username", ""), ("role", ""), ("page", "Dashboard"), ("last_activity", None)]:
     if key not in st.session_state:
@@ -80,6 +131,7 @@ for key, val in [("authenticated", False), ("username", ""), ("role", ""), ("pag
 
 # —————————————————————————————
 # 3) STILE GRAFICO
+# (Nessuna modifica qui)
 # —————————————————————————————
 def set_page_style():
     bg_color, sidebar_bg_color, text_color = "#000000", "#0F172A", "#FFFFFF"
@@ -96,14 +148,11 @@ def set_page_style():
              color: {text_color} !important; 
         }}
         [data-testid="stToolbar"] {{ display: none !important; }}
-
-        /* --- MODIFICA: REINSERITO STILE PERSONALIZZATO PER LE TABELLE --- */
         .stDataFrame, .stDataEditor {{
             border-radius: 10px;
             overflow: hidden;
             border: 1px solid rgba(148, 163, 184, 0.2);
         }}
-        /* Intestazione della tabella */
         [data-testid="stDataFrame"] thead th, [data-testid="stDataEditor-header"] {{
             background-color: #1E293B;
             color: white;
@@ -111,20 +160,16 @@ def set_page_style():
             text-transform: uppercase;
             font-size: 14px;
         }}
-        /* Corpo della tabella */
         [data-testid="stDataFrame"] tbody tr, [data-testid="stDataEditor-row"] {{
             background-color: transparent;
         }}
-        /* Righe alternate (zebra) */
         [data-testid="stDataFrame"] tbody tr:nth-child(even), [data-testid="stDataEditor-row"]:nth-child(even) {{
             background-color: rgba(45, 55, 72, 0.5);
         }}
-        /* Celle */
         [data-testid="stDataFrame"] td, [data-testid="stDataEditor-cell"] {{
             color: #E2E8F0;
             border-color: rgba(148, 163, 184, 0.2) !important;
         }}
-        /* Scrollbar personalizzate */
         div[data-testid="stDataFrame"] div[role="grid"], div[data-testid="stDataEditor"] div[role="grid"] {{
             scrollbar-color: #4A5568 #2D3748;
             scrollbar-width: thin;
@@ -149,15 +194,25 @@ def set_page_style():
 # 4) LOGIN, LOGOUT & GESTIONE SESSIONE
 # —————————————————————————————
 def do_login(user, pwd):
-    row = conn.execute("SELECT role FROM users WHERE username=? AND password=?", (user, pwd)).fetchone()
-    if row:
-        st.session_state.update(authenticated=True, username=user, role=row["role"], page="Dashboard", last_activity=datetime.now())
-        return True
-    return False
+    # Modificato per usare il nuovo client
+    conn = get_connection()
+    try:
+        rs = conn.execute("SELECT role FROM users WHERE username=? AND password=?", (user, pwd))
+        if len(rs.rows) > 0:
+            role = rs.rows[0][0] # Estrai il ruolo dalla prima riga e colonna
+            st.session_state.update(authenticated=True, username=user, role=role, page="Dashboard", last_activity=datetime.now())
+            return True
+        return False
+    finally:
+        conn.close()
 
 def do_logout(message="Logout effettuato con successo."):
     st.session_state.update(authenticated=False, username="", role="", page="Login", last_activity=None)
     st.info(message)
+
+# DA QUI IN POI, IL CODICE USA LE FUNZIONI DI ALTO LIVELLO (load_risks_df, db_write, etc.)
+# QUINDI LE MODIFICHE SONO MINIME, SOLO PER SOSTITUIRE LE CHIAMATE DIRETTE A conn.execute
+# CON LA NUOVA FUNZIONE db_write().
 
 set_page_style()
 
@@ -216,7 +271,11 @@ with st.sidebar:
 page = st.session_state.page
 st.title(page)
 
+# ... (Il resto del codice rimane quasi identico, ma le chiamate a conn.execute e conn.commit
+# devono essere sostituite con la nuova funzione db_write)
+
 if page == "Dashboard":
+    # (Nessuna modifica, usa load_risks_df)
     df_risks = load_risks_df()
     df_reminders = load_reminders_df()
 
@@ -262,7 +321,6 @@ if page == "Dashboard":
     st.subheader("Dettaglio Rischi")
     st.dataframe(dff, use_container_width=True)
 
-
 elif page == "Follow-up":
     st.info("Traccia le comunicazioni inviate ai fornitori e le evidenze ricevute.")
     with st.expander("➕ Aggiungi Nuovo Reminder", expanded=False):
@@ -271,8 +329,8 @@ elif page == "Follow-up":
             data_invio = st.date_input("Data di invio email", value=datetime.today())
             if st.form_submit_button("Aggiungi Reminder", use_container_width=True):
                 if fornitore_nome:
-                    conn.execute("INSERT INTO reminders (fornitore_nome, data_invio, stato_reminder) VALUES (?, ?, 'Attivo')", (fornitore_nome, data_invio.isoformat()))
-                    conn.commit()
+                    # MODIFICA: Usa db_write
+                    db_write("INSERT INTO reminders (fornitore_nome, data_invio, stato_reminder) VALUES (?, ?, 'Attivo')", (fornitore_nome, data_invio.isoformat()))
                     st.success(f"Reminder per {fornitore_nome} aggiunto!"); st.rerun()
                 else: st.error("Il nome del fornitore è obbligatorio.")
     st.markdown("---")
@@ -305,8 +363,8 @@ elif page == "Follow-up":
                         data_tuple = (row_to_update["fornitore_nome"], row_to_update["stato_reminder"], row_to_update["note"],
                             int(row_to_update["test_bc"]), int(row_to_update["test_it"]), int(row_to_update["test_pt_va"]),
                             int(row_to_update["access_review"]), int(row_to_update["ppt"]), int(row_id))
-                        conn.execute("UPDATE reminders SET fornitore_nome=?, stato_reminder=?, note=?, test_bc=?, test_it=?, test_pt_va=?, access_review=?, ppt=? WHERE id=?", data_tuple)
-                    conn.commit()
+                        # MODIFICA: Usa db_write
+                        db_write("UPDATE reminders SET fornitore_nome=?, stato_reminder=?, note=?, test_bc=?, test_it=?, test_pt_va=?, access_review=?, ppt=? WHERE id=?", data_tuple)
                     st.success(f"Salvate {len(ids_to_update)} modifiche."); st.rerun()
             except Exception as e: st.error(f"Errore durante il salvataggio: {e}")
 
@@ -327,9 +385,9 @@ elif page == "Censimento Fornitori":
         if st.form_submit_button("Salva Rischio", use_container_width=True):
             if not all([fornitore, contract_owner, area_riferimento]) or rischio.startswith("--"): st.error("Compila tutti i campi obbligatori.")
             else:
-                conn.execute("INSERT INTO risks(data_inizio,data_fine,fornitore,rischio,stato,gravita,note,data_chiusura,contract_owner,area_riferimento,perc_avanzamento) VALUES(?,?,?,?,?,?,?,?,?,?,?)", 
+                # MODIFICA: Usa db_write
+                db_write("INSERT INTO risks(data_inizio,data_fine,fornitore,rischio,stato,gravita,note,data_chiusura,contract_owner,area_riferimento,perc_avanzamento) VALUES(?,?,?,?,?,?,?,?,?,?,?)", 
                              (data_inizio.isoformat(), data_fine.isoformat(), fornitore, rischio, stato, gravita, note, data_chiusura.isoformat() if data_chiusura else None, contract_owner, area_riferimento, perc_avanzamento))
-                conn.commit()
                 st.success("Rischio inserito.")
 
 elif page == "Modifica":
@@ -340,30 +398,48 @@ elif page == "Modifica":
     dff_original = df_risks.copy()
     if sel != "Tutti":
         dff_original = dff_original[dff_original["fornitore"] == sel]
+    
+    # Converti le date in oggetti date per il data_editor, altrimenti darà errore
+    dff_original['data_inizio'] = pd.to_datetime(dff_original['data_inizio']).dt.date
+    dff_original['data_fine'] = pd.to_datetime(dff_original['data_fine']).dt.date
+    dff_original['data_chiusura'] = pd.to_datetime(dff_original['data_chiusura']).dt.date
+
     edited_df = st.data_editor(dff_original, num_rows="static", use_container_width=True,
         column_config={"id": st.column_config.NumberColumn("ID", disabled=True), "data_fine": st.column_config.DateColumn("Due Date", format="YYYY-MM-DD")},
         key="data_editor_modifica")
+        
     if st.button("Salva Modifiche", use_container_width=True):
         try:
+            # Re-indicizza per il confronto
             original_to_compare = dff_original.set_index('id')
             edited_to_compare = edited_df.set_index('id')
             diff_df = original_to_compare.compare(edited_to_compare)
+            
             if diff_df.empty: st.toast("Nessuna modifica da salvare.")
             else:
                 ids_to_update = diff_df.index.get_level_values('id').unique()
                 for row_id in ids_to_update:
                     row_to_update = edited_to_compare.loc[row_id]
+                    # Funzione helper per convertire in isoformat solo se non è NaT
+                    def to_iso_or_none(date_obj):
+                        if pd.isna(date_obj): return None
+                        # Se è un oggetto datetime.date, convertilo in stringa
+                        if isinstance(date_obj, datetime.date): return date_obj.isoformat()
+                        return None
+                    
                     data_tuple = (
-                        row_to_update["data_inizio"].isoformat() if pd.notna(row_to_update["data_inizio"]) else None,
-                        row_to_update["data_fine"].isoformat() if pd.notna(row_to_update["data_fine"]) else None,
+                        to_iso_or_none(row_to_update["data_inizio"]),
+                        to_iso_or_none(row_to_update["data_fine"]),
                         row_to_update["fornitore"], row_to_update["rischio"], row_to_update["stato"], row_to_update["gravita"], row_to_update["note"],
-                        row_to_update["data_chiusura"].isoformat() if pd.notna(row_to_update["data_chiusura"]) else None,
+                        to_iso_or_none(row_to_update["data_chiusura"]),
                         row_to_update["contract_owner"], row_to_update["area_riferimento"], int(row_to_update["perc_avanzamento"]), int(row_id))
-                    conn.execute("UPDATE risks SET data_inizio=?, data_fine=?, fornitore=?, rischio=?, stato=?, gravita=?, note=?, data_chiusura=?, contract_owner=?, area_riferimento=?, perc_avanzamento=? WHERE id=?", data_tuple)
-                conn.commit()
+                    
+                    # MODIFICA: Usa db_write
+                    db_write("UPDATE risks SET data_inizio=?, data_fine=?, fornitore=?, rischio=?, stato=?, gravita=?, note=?, data_chiusura=?, contract_owner=?, area_riferimento=?, perc_avanzamento=? WHERE id=?", data_tuple)
                 st.success(f"Salvate {len(ids_to_update)} modifiche."); st.rerun()
         except Exception as e: st.error(f"Errore durante il salvataggio: {e}")
 
+# ... La pagina Report PDF non scrive nel DB, quindi non necessita modifiche ...
 elif page == "Report PDF":
     df_risks = load_risks_df()
     st.info("Genera un report PDF avanzato con grafici di sintesi e dettagli strutturati per ogni rischio.")
@@ -446,10 +522,10 @@ elif page == "Admin":
                 if not nu or not npwd: st.error("Compila tutti i campi.")
                 else:
                     try:
-                        conn.execute("INSERT INTO users(username,password,role) VALUES(?,?,?)", (nu, npwd, nrole))
-                        conn.commit()
+                        # MODIFICA: Usa db_write
+                        db_write("INSERT INTO users(username,password,role) VALUES(?,?,?)", (nu, npwd, nrole))
                         st.success("Utente creato."); st.rerun()
-                    except sqlite3.IntegrityError: st.error("Username già esistente.")
+                    except Exception: st.error("Username già esistente.")
         st.markdown("---")
         with st.form("delete_user", clear_on_submit=True):
             st.subheader("Elimina Utente")
@@ -458,6 +534,6 @@ elif page == "Admin":
             else:
                 user_to_delete = st.selectbox("Seleziona utente", users_list)
                 if st.form_submit_button("Elimina Utente", type="primary", use_container_width=True):
-                    conn.execute("DELETE FROM users WHERE username = ?", (user_to_delete,))
-                    conn.commit()
+                    # MODIFICA: Usa db_write
+                    db_write("DELETE FROM users WHERE username = ?", (user_to_delete,))
                     st.success(f"Utente '{user_to_delete}' eliminato."); st.rerun()
