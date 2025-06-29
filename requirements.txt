@@ -3,3 +3,5 @@ pandas
 plotly
 reportlab
 kaleido
+psycopg2-binary
+sqlalchemy
