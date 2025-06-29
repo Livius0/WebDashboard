@@ -145,12 +145,12 @@ def set_page_style():
     """
     st.markdown(css, unsafe_allow_html=True)
 
-### INTEGRAZIONE ###
-# Funzione di styling aggiornata per gestire l'assenza di matplotlib
+### CORREZIONE FINALE ###
+# Funzione di styling che gestisce correttamente date mancanti (NaT)
 def style_risk_dataframe(df: pd.DataFrame):
     """
-    Applica stili condizionali al DataFrame dei rischi per una migliore visualizzazione.
-    Gestisce l'ImportError se matplotlib non è installato.
+    Applica stili condizionali al DataFrame dei rischi.
+    Gestisce l'assenza di matplotlib e formatta correttamente le date mancanti (NaT).
     """
     def style_gravita(v):
         color_map = {
@@ -167,19 +167,17 @@ def style_risk_dataframe(df: pd.DataFrame):
     styled_df = df.style.applymap(style_gravita, subset=['gravita']) \
                         .applymap(style_stato, subset=['stato'])
     
-    # Tenta di applicare il gradiente, ma non blocca l'app in caso di errore
+    # Tenta di applicare il gradiente per la % avanzamento
     try:
         styled_df = styled_df.background_gradient(cmap='Blues', subset=['perc_avanzamento'], vmin=0, vmax=100)
     except ImportError:
-        # Se matplotlib non è installato, questo blocco previene il crash dell'app.
-        # L'avviso verrà stampato nei log del terminale / della console.
         print("Avviso: 'matplotlib' non trovato. Lo stile 'background_gradient' non sarà applicato.")
 
-    # Applica la formattazione finale
+    # Applica la formattazione finale, gestendo correttamente i valori NaT per tutte le date
     styled_df = styled_df.format({
-        "data_inizio": "{:%d/%m/%Y}",
-        "data_fine": "{:%d/%m/%Y}",
-        "data_chiusura": lambda x: "{:%d/%m/%Y}".format(x) if pd.notna(x) else "N/A",
+        "data_inizio": lambda t: t.strftime("%d/%m/%Y") if pd.notna(t) else "N/A",
+        "data_fine": lambda t: t.strftime("%d/%m/%Y") if pd.notna(t) else "N/A",
+        "data_chiusura": lambda t: t.strftime("%d/%m/%Y") if pd.notna(t) else "N/A",
         "perc_avanzamento": "{}%"
     })
     
@@ -223,6 +221,7 @@ if not st.session_state.authenticated:
 
 if st.session_state.authenticated:
     if st.session_state.last_activity:
+        # La sessione scade dopo 30 minuti (1800 secondi) di inattività
         if (datetime.now() - st.session_state.last_activity).total_seconds() > 1800:
             do_logout(message="Sessione scaduta per inattività. Effettua nuovamente il login.")
             st.rerun()
@@ -529,4 +528,3 @@ elif page == "Admin":
                     conn.execute("DELETE FROM users WHERE username = ?", (user_to_delete,))
                     conn.commit()
                     st.success(f"Utente '{user_to_delete}' eliminato."); st.rerun()
-
