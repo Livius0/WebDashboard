@@ -5,3 +5,4 @@ reportlab
 kaleido
 psycopg2-binary
 sqlalchemy
+libsql-client
