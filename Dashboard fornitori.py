@@ -1,4 +1,4 @@
-Import streamlit as st
+import streamlit as st
 import pandas as pd
 import plotly.express as px
 import sqlite3
@@ -93,11 +93,11 @@ def set_page_style():
         }}
         [data-testid="stSidebarCollapseButton"] {{ display: none !important; }}
         h1, h2, h3, p, label, .st-emotion-cache-16txtl3, .st-emotion-cache-qbe2hs, .st-emotion-cache-aw8l5d, .st-emotion-cache-bm2z3a {{
-             color: {text_color} !important; 
+             color: {text_color} !important;
         }}
         [data-testid="stToolbar"] {{ display: none !important; }}
 
-        /* --- MODIFICA: REINSERITO STILE PERSONALIZZATO PER LE TABELLE --- */
+        /* --- Stile personalizzato per le tabelle --- */
         .stDataFrame, .stDataEditor {{
             border-radius: 10px;
             overflow: hidden;
@@ -144,6 +144,33 @@ def set_page_style():
     </style>
     """
     st.markdown(css, unsafe_allow_html=True)
+
+### MODIFICA ###
+# Nuova funzione per applicare stili dinamici alle tabelle dei rischi
+def style_risk_dataframe(df: pd.DataFrame):
+    """Applica stili condizionali al DataFrame dei rischi per una migliore visualizzazione."""
+    def style_gravita(v):
+        color_map = {
+            "Critical": "background-color: #d9534f; color: white; font-weight: bold;",
+            "High": "background-color: #f0ad4e; color: black;",
+            "Low": "background-color: #5cb85c; color: white;"
+        }
+        return color_map.get(v, None)
+
+    def style_stato(v):
+        return "background-color: #3182bd; color: white;" if v == "aperto" else "background-color: #4A5568; color: #E2E8F0;"
+
+    # Applica gli stili
+    styled_df = df.style.applymap(style_gravita, subset=['gravita']) \
+                        .applymap(style_stato, subset=['stato']) \
+                        .background_gradient(cmap='Blues', subset=['perc_avanzamento'], vmin=0, vmax=100) \
+                        .format({
+                            "data_inizio": "{:%d/%m/%Y}",
+                            "data_fine": "{:%d/%m/%Y}",
+                            "data_chiusura": lambda x: "{:%d/%m/%Y}".format(x) if pd.notna(x) else "N/A",
+                            "perc_avanzamento": "{}%"
+                        })
+    return styled_df
 
 # —————————————————————————————
 # 4) LOGIN, LOGOUT & GESTIONE SESSIONE
@@ -224,14 +251,14 @@ if page == "Dashboard":
     if not df_reminders.empty and 'giorni_trascorsi' in df_reminders.columns:
         reminders_scaduti = df_reminders[(df_reminders['giorni_trascorsi'] >= 5) & (df_reminders['stato_reminder'] == 'Attivo')]
     else:
-        reminders_scaduti = pd.DataFrame() 
+        reminders_scaduti = pd.DataFrame()
 
     if reminders_scaduti.empty:
         st.success("✔️ Nessun reminder scaduto. Ottimo lavoro!")
     else:
         for _, row in reminders_scaduti.iterrows():
             st.warning(f"⚠️ **{row['fornitore_nome']}**: Sono passati **{row['giorni_trascorsi']} giorni** dall'invio dell'email. Controllare le risposte.")
-    
+
     st.markdown("---")
     st.subheader("Riepilogo Rapido Rischi")
     total, open_r, closed = len(df_risks), len(df_risks[df_risks['stato'] == 'aperto']), len(df_risks[df_risks['stato'] == 'chiuso'])
@@ -257,10 +284,12 @@ if page == "Dashboard":
                 st.plotly_chart(fig_bar, use_container_width=True)
             with gc2:
                 agg_pie = dff.groupby("gravita").size().reset_index(name="count")
-                fig_pie = px.pie(agg_pie, values="count", names="gravita", hole=0.4, title="Ripartizione Rischi per Gravità", color_discrete_map={"Critical": "#d9534f", "Hight": "#f0ad4e", "Low": "#5cb85c"})
+                ### MODIFICA ###: Corretto "Hight" in "High"
+                fig_pie = px.pie(agg_pie, values="count", names="gravita", hole=0.4, title="Ripartizione Rischi per Gravità", color_discrete_map={"Critical": "#d9534f", "High": "#f0ad4e", "Low": "#5cb85c"})
                 st.plotly_chart(fig_pie, use_container_width=True)
     st.subheader("Dettaglio Rischi")
-    st.dataframe(dff, use_container_width=True)
+    ### MODIFICA ###: Applicazione della funzione di styling alla tabella
+    st.dataframe(style_risk_dataframe(dff), use_container_width=True)
 
 
 elif page == "Follow-up":
@@ -295,11 +324,13 @@ elif page == "Follow-up":
         if st.button("Salva Modifiche Reminder", use_container_width=True):
             try:
                 original_to_compare = dff_attivi.set_index('id')
-                edited_to_compare = edited_reminders.set_index('id')
-                diff_df = original_to_compare.compare(edited_to_compare)
+                # st.data_editor restituisce un DataFrame, non un dizionario
+                edited_to_compare = pd.DataFrame(edited_reminders).set_index('id')
+                diff_df = original_to_compare.compare(edited_to_compare, keep_shape=True).dropna(how='all', axis=0)
+
                 if diff_df.empty: st.toast("Nessuna modifica da salvare.")
                 else:
-                    ids_to_update = diff_df.index.get_level_values('id').unique()
+                    ids_to_update = diff_df.index.unique()
                     for row_id in ids_to_update:
                         row_to_update = edited_to_compare.loc[row_id]
                         data_tuple = (row_to_update["fornitore_nome"], row_to_update["stato_reminder"], row_to_update["note"],
@@ -315,19 +346,27 @@ elif page == "Censimento Fornitori":
         st.subheader("Censimento Nuovo Rischio Fornitore")
         c1, c2 = st.columns(2)
         with c1:
-            fornitore, contract_owner, area_riferimento = st.text_input("Nome fornitore"), st.text_input("Contract Owner"), st.text_input("Area di riferimento")
-            gravita = st.selectbox("Livello di gravità", ["Low","Hight","Critical"])
+            fornitore = st.text_input("Nome fornitore")
+            contract_owner = st.text_input("Contract Owner")
+            area_riferimento = st.text_input("Area di riferimento")
+            ### MODIFICA ###: Corretto "Hight" in "High"
+            gravita = st.selectbox("Livello di gravità", ["Low","High","Critical"])
         with c2:
             rischio = st.selectbox("Scenario di rischio", ["-- seleziona --", "Inadeguate Security of third party", "Inadeguate resilience of third party", "Inadequate outsourcing of third party"])
             stato = st.radio("Stato", ["aperto","chiuso"], horizontal=True)
-            data_inizio, data_fine = st.date_input("Data inizio", value=datetime.today()), st.date_input("Due Date", value=datetime.today())
+            data_inizio = st.date_input("Data inizio", value=datetime.today())
+            data_fine = st.date_input("Due Date", value=datetime.today())
             data_chiusura = st.date_input("Data di chiusura effettiva", value=datetime.today()) if stato == "chiuso" else None
+        
+        ### MODIFICA ###: Aggiunto separatore per migliorare il layout
+        st.markdown("---")
         perc_avanzamento = st.slider("Percentuale di avanzamento (%)", 0, 100, 0)
         note = st.text_area("Note libere")
         if st.form_submit_button("Salva Rischio", use_container_width=True):
-            if not all([fornitore, contract_owner, area_riferimento]) or rischio.startswith("--"): st.error("Compila tutti i campi obbligatori.")
+            if not all([fornitore, contract_owner, area_riferimento]) or rischio.startswith("--"):
+                st.error("Compila tutti i campi obbligatori.")
             else:
-                conn.execute("INSERT INTO risks(data_inizio,data_fine,fornitore,rischio,stato,gravita,note,data_chiusura,contract_owner,area_riferimento,perc_avanzamento) VALUES(?,?,?,?,?,?,?,?,?,?,?)", 
+                conn.execute("INSERT INTO risks(data_inizio,data_fine,fornitore,rischio,stato,gravita,note,data_chiusura,contract_owner,area_riferimento,perc_avanzamento) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                              (data_inizio.isoformat(), data_fine.isoformat(), fornitore, rischio, stato, gravita, note, data_chiusura.isoformat() if data_chiusura else None, contract_owner, area_riferimento, perc_avanzamento))
                 conn.commit()
                 st.success("Rischio inserito.")
@@ -340,15 +379,20 @@ elif page == "Modifica":
     dff_original = df_risks.copy()
     if sel != "Tutti":
         dff_original = dff_original[dff_original["fornitore"] == sel]
-    edited_df = st.data_editor(dff_original, num_rows="static", use_container_width=True,
+
+    ### MODIFICA ###: Rimosso num_rows="static" per maggiore chiarezza
+    edited_df = st.data_editor(dff_original, use_container_width=True,
         column_config={"id": st.column_config.NumberColumn("ID", disabled=True), "data_fine": st.column_config.DateColumn("Due Date", format="YYYY-MM-DD")},
         key="data_editor_modifica")
+
     if st.button("Salva Modifiche", use_container_width=True):
         try:
             original_to_compare = dff_original.set_index('id')
             edited_to_compare = edited_df.set_index('id')
             diff_df = original_to_compare.compare(edited_to_compare)
-            if diff_df.empty: st.toast("Nessuna modifica da salvare.")
+
+            if diff_df.empty:
+                st.toast("Nessuna modifica da salvare.")
             else:
                 ids_to_update = diff_df.index.get_level_values('id').unique()
                 for row_id in ids_to_update:
@@ -362,20 +406,26 @@ elif page == "Modifica":
                     conn.execute("UPDATE risks SET data_inizio=?, data_fine=?, fornitore=?, rischio=?, stato=?, gravita=?, note=?, data_chiusura=?, contract_owner=?, area_riferimento=?, perc_avanzamento=? WHERE id=?", data_tuple)
                 conn.commit()
                 st.success(f"Salvate {len(ids_to_update)} modifiche."); st.rerun()
-        except Exception as e: st.error(f"Errore durante il salvataggio: {e}")
+        except Exception as e:
+            st.error(f"Errore durante il salvataggio: {e}")
 
 elif page == "Report PDF":
     df_risks = load_risks_df()
     st.info("Genera un report PDF avanzato con grafici di sintesi e dettagli strutturati per ogni rischio.")
     st.subheader("1. Seleziona il Perimetro del Report")
-    all_suppliers, default_stati, default_gravita = sorted(df_risks["fornitore"].unique().tolist()), list(df_risks["stato"].unique()), list(df_risks["gravita"].unique())
+    all_suppliers = sorted(df_risks["fornitore"].unique().tolist())
+    default_stati = list(df_risks["stato"].unique())
+    ### MODIFICA ###: Corretto "Hight" in "High"
+    default_gravita = sorted(list(df_risks["gravita"].unique()))
     sel_suppliers = st.multiselect("Filtro Fornitore/i", all_suppliers)
     c1, c2 = st.columns(2)
     with c1: sel_stati = st.multiselect("Filtro Stato", default_stati, default=default_stati)
     with c2: sel_gravita = st.multiselect("Filtro Gravità", default_gravita, default=default_gravita)
+
     dff = df_risks.copy()
     if sel_suppliers: dff = dff[dff["fornitore"].isin(sel_suppliers)]
     dff = dff[dff["stato"].isin(sel_stati) & dff["gravita"].isin(sel_gravita)]
+
     st.markdown("---")
     st.subheader("2. Anteprima Dati e Generazione PDF")
     if dff.empty: st.warning("Nessun dato corrisponde ai filtri selezionati.")
@@ -384,15 +434,25 @@ elif page == "Report PDF":
         st.dataframe(dff.head(), use_container_width=True)
         if st.button("🚀 Genera Report PDF Avanzato", use_container_width=True):
             def build_advanced_pdf(data: pd.DataFrame) -> bytes:
-                buffer = BytesIO(); doc = BaseDocTemplate(buffer, pagesize=A4, leftMargin=30, rightMargin=30, topMargin=30, bottomMargin=50)
-                styles=getSampleStyleSheet(); style_title, style_h1, style_h2, style_body = styles['Title'], styles['h1'], styles['h2'], styles['BodyText']
-                style_body.leading = 14; color_map = {"Critical": colors.HexColor("#d9534f"), "Hight": colors.HexColor("#f0ad4e"), "Low": colors.HexColor("#5cb85c")}
+                buffer = BytesIO()
+                doc = BaseDocTemplate(buffer, pagesize=A4, leftMargin=30, rightMargin=30, topMargin=30, bottomMargin=50)
+                styles=getSampleStyleSheet()
+                style_title, style_h1, style_h2, style_body = styles['Title'], styles['h1'], styles['h2'], styles['BodyText']
+                style_body.leading = 14
+                ### MODIFICA ###: Corretto "Hight" in "High"
+                color_map = {"Critical": colors.HexColor("#d9534f"), "High": colors.HexColor("#f0ad4e"), "Low": colors.HexColor("#5cb85c")}
+
                 def header_footer(canvas, doc):
-                    canvas.saveState(); canvas.setFont('Helvetica', 9)
+                    canvas.saveState()
+                    canvas.setFont('Helvetica', 9)
                     canvas.drawString(doc.leftMargin, doc.pagesize[1] - 20, "Report Rischi Fornitori | Confidenziale")
-                    canvas.drawRightString(doc.pagesize[0] - doc.rightMargin, doc.bottomMargin - 20, f"Pagina {doc.page}"); canvas.restoreState()
+                    canvas.drawRightString(doc.pagesize[0] - doc.rightMargin, doc.bottomMargin - 20, f"Pagina {doc.page}")
+                    canvas.restoreState()
+
                 frame = Frame(doc.leftMargin, doc.bottomMargin, doc.width, doc.height, id='normal')
-                template = PageTemplate(id='main', frames=frame, onPage=header_footer); doc.addPageTemplates([template])
+                template = PageTemplate(id='main', frames=frame, onPage=header_footer)
+                doc.addPageTemplates([template])
+
                 story = []
                 story.append(Paragraph("Report di Analisi Rischi", style_title)); story.append(Spacer(1, 24))
                 story.append(Paragraph(f"Data di Generazione: {datetime.now().strftime('%d/%m/%Y %H:%M')}", style_body))
@@ -400,6 +460,7 @@ elif page == "Report PDF":
                 story.append(Paragraph("Executive Summary", style_h1)); story.append(Spacer(1, 12))
                 total, open_r, critical = len(data), len(data[data['stato'] == 'aperto']), len(data[data['gravita'] == 'Critical'])
                 story.append(Paragraph(f"Totale riscontri: {total} | Aperti: {open_r} | Critici: {critical}", style_body)); story.append(Spacer(1, 24))
+
                 if not data.empty and not data.groupby("gravita").size().empty:
                     try:
                         agg_pie = data.groupby("gravita").size().reset_index(name="count")
@@ -407,6 +468,7 @@ elif page == "Report PDF":
                         pie_img_bytes = fig_pie.to_image(format="png", width=500, height=350, engine="kaleido")
                         story.append(Image(BytesIO(pie_img_bytes), width=450, height=315))
                     except Exception as e: story.append(Paragraph(f"Errore generazione grafico: {e}", style_body))
+
                 story.append(Spacer(1, 24)); story.append(Paragraph("Dettaglio dei Riscontri", style_h1))
                 for fornitore, group in data.groupby("fornitore"):
                     story.append(Spacer(1, 12)); story.append(Paragraph(f"Fornitore: {fornitore}", style_h2))
@@ -429,7 +491,8 @@ elif page == "Report PDF":
                 try:
                     pdf_bytes = build_advanced_pdf(dff)
                     st.download_button(label="✅ Download Report PDF", data=pdf_bytes, file_name=f"report_rischi_{datetime.now().strftime('%Y%m%d')}.pdf", mime="application/pdf", use_container_width=True)
-                except Exception as e: st.error(f"Errore generazione PDF: {e}. Assicurati di aver installato 'kaleido'.")
+                except Exception as e:
+                    st.error(f"Errore generazione PDF: {e}. Assicurati che la libreria 'kaleido' sia installata (`pip install kaleido`).")
 
 elif page == "Admin":
     users_df = load_users()
