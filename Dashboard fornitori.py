@@ -234,7 +234,6 @@ if page == "Dashboard":
 
 elif page == "Follow-up":
     st.info("Traccia le comunicazioni inviate ai fornitori e le evidenze ricevute.")
-    
     with st.expander("➕ Aggiungi Nuovo Reminder", expanded=False):
         with st.form("form_reminder", clear_on_submit=True):
             fornitore_nome = st.text_input("Nome Fornitore o Contatto")
@@ -243,73 +242,49 @@ elif page == "Follow-up":
                 if fornitore_nome:
                     conn.execute("INSERT INTO reminders (fornitore_nome, data_invio, stato_reminder) VALUES (?, ?, 'Attivo')", (fornitore_nome, data_invio.isoformat()))
                     conn.commit()
-                    st.success(f"Reminder per {fornitore_nome} aggiunto!")
-                    st.rerun()
-                else:
-                    st.error("Il nome del fornitore è obbligatorio.")
-
+                    st.success(f"Reminder per {fornitore_nome} aggiunto!"); st.rerun()
+                else: st.error("Il nome del fornitore è obbligatorio.")
     st.markdown("---")
     st.subheader("Tracciamento Reminder Attivi")
-    
     df_reminders = load_reminders_df()
     dff_attivi = df_reminders[df_reminders['stato_reminder'] == 'Attivo'].copy()
-
     if dff_attivi.empty:
         st.success("✔️ Nessun reminder attivo al momento.")
     else:
-        edited_reminders = st.data_editor(
-            dff_attivi,
-            column_config={
-                "id": None, # Nasconde la colonna ID
-                "fornitore_nome": st.column_config.TextColumn("Fornitore", width="medium"),
+        edited_reminders = st.data_editor(dff_attivi, column_config={
+                "id": None, "fornitore_nome": st.column_config.TextColumn("Fornitore", width="medium"),
                 "data_invio": st.column_config.DateColumn("Data Invio", format="DD/MM/YYYY", disabled=True),
                 "giorni_trascorsi": st.column_config.NumberColumn("Giorni Trascorsi"),
                 "giorni_al_reminder": st.column_config.ProgressColumn("Giorni a Notifica (5)", format="%f", min_value=0, max_value=5),
                 "stato_reminder": st.column_config.SelectboxColumn("Stato", options=["Attivo", "Risposto"]),
-                "note": st.column_config.TextColumn("Note", width="large"),
-                "test_bc": st.column_config.CheckboxColumn("Test BC"),
-                "test_it": st.column_config.CheckboxColumn("Test IT"),
-                "test_pt_va": st.column_config.CheckboxColumn("PT/VA"),
-                "access_review": st.column_config.CheckboxColumn("Access Review"),
-                "ppt": st.column_config.CheckboxColumn("PPT"),
-            },
-            use_container_width=True,
-            hide_index=True,
-            key="editor_reminders"
-        )
-
-        # --- MODIFICA CRUCIALE: Logica di salvataggio corretta e robusta ---
+                "note": st.column_config.TextColumn("Note", width="large"), "test_bc": st.column_config.CheckboxColumn("Test BC"),
+                "test_it": st.column_config.CheckboxColumn("Test IT"), "test_pt_va": st.column_config.CheckboxColumn("PT/VA"),
+                "access_review": st.column_config.CheckboxColumn("Access Review"), "ppt": st.column_config.CheckboxColumn("PPT"),
+            }, use_container_width=True, hide_index=True, key="editor_reminders")
+        
+        ## MODIFICA CRUCIALE: Sostituita la logica di confronto con un salvataggio diretto.
         if st.button("Salva Modifiche Reminder", use_container_width=True):
             try:
-                # Itera su ogni riga modificata e aggiorna il database
+                num_saved = 0
                 for index, row in edited_reminders.iterrows():
-                    # Prende l'ID originale dalla riga corrispondente prima della modifica
-                    original_id = dff_attivi.iloc[index]['id']
-                    
                     # Converte i booleani delle checkbox in interi (0 o 1) per il DB
                     data_tuple = (
-                        row["fornitore_nome"],
-                        row["stato_reminder"],
-                        row["note"],
-                        int(row["test_bc"]),
-                        int(row["test_it"]),
-                        int(row["test_pt_va"]),
-                        int(row["access_review"]),
-                        int(row["ppt"]),
-                        original_id # Usa l'ID originale per la clausola WHERE
+                        row["fornitore_nome"], row["stato_reminder"], row["note"],
+                        int(row["test_bc"]), int(row["test_it"]), int(row["test_pt_va"]),
+                        int(row["access_review"]), int(row["ppt"]), int(row["id"])
                     )
-                    
                     conn.execute("""
-                        UPDATE reminders 
-                        SET fornitore_nome=?, stato_reminder=?, note=?, test_bc=?,
-                            test_it=?, test_pt_va=?, access_review=?, ppt=? 
-                        WHERE id=?
+                        UPDATE reminders SET fornitore_nome=?, stato_reminder=?, note=?, test_bc=?,
+                        test_it=?, test_pt_va=?, access_review=?, ppt=? WHERE id=?
                     """, data_tuple)
+                    num_saved += 1
                 
-                conn.commit()
-                st.success(f"Modifiche salvate con successo.")
-                st.rerun()
-
+                if num_saved > 0:
+                    conn.commit()
+                    st.success(f"Salvate le modifiche per {num_saved} record.")
+                    st.rerun()
+                else:
+                    st.toast("Nessuna modifica da salvare.") # Questo caso ora è improbabile
             except Exception as e:
                 st.error(f"Errore durante il salvataggio: {e}")
 
